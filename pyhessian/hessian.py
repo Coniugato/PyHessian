@@ -243,9 +243,7 @@ class hessian():
             a_, b_ = torch.linalg.eig(T)
             eigen_list = a_.real
             weight_list = b_.real[0,:]**2
-
-            eigen_list = eigenvalues.real
-            weight_list = torch.pow(eigenvectors[0,:], 2)
+            
             eigen_list_full.append(list(eigen_list.cpu().numpy()))
             weight_list_full.append(list(weight_list.cpu().numpy()))
 
