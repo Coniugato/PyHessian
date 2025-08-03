@@ -37,7 +37,6 @@ def get_esd_plot(eigenvalues, weights, filepath=None):
     if filepath:
         plt.savefig(filepath)
     plt.show()
-    plt.close()
 
 
 def density_generate(eigenvalues,
