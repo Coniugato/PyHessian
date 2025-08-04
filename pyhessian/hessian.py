@@ -4,6 +4,7 @@ import torch
 import math
 from torch.autograd import Variable
 import numpy as np
+import tqdm
 
 from pyhessian.utils import group_product, group_add, normalization, get_params_grad, hessian_vector_product, orthnormal
 
@@ -179,60 +180,79 @@ class hessian():
         n_v: number of SLQ runs
         """
 
+        try:
+            progress_tqdm = tqdm.notebook.tqdm
+        except:
+            progress_tqdm = tqdm.tqdm
+
         device = self.device
         eigen_list_full = []
         weight_list_full = []
 
-        for k in range(n_v):
-            v = [
-                torch.randint_like(p, high=2, device=device)
-                for p in self.params
-            ]
-            # generate Rademacher random variables
-            for v_i in v:
-                v_i[v_i == 0] = -1
-            v = normalization(v)
+        skipped_runs = 0  # count the number of skipped runs due to non-finite values
+        for k in progress_tqdm(range(n_v)):
+            while True:
+                v = [
+                    torch.randint_like(p, high=2, device=device)
+                    for p in self.params
+                ]
+                # generate Rademacher random variables
+                for v_i in v:
+                    v_i[v_i == 0] = -1
+                v = normalization(v)
 
-            # standard lanczos algorithm initlization
-            v_list = [v]
-            w_list = []
-            alpha_list = []
-            beta_list = []
-            ############### Lanczos
-            for i in range(iter):
-                self.model.zero_grad()
-                w_prime = [torch.zeros(p.size()).to(device) for p in self.params]
-                if i == 0:
-                    if self.full_dataset:
-                        _, w_prime = self.dataloader_hv_product(v)
+                # standard lanczos algorithm initlization
+                v_list = [v]
+                w_list = []
+                alpha_list = []
+                beta_list = []
+                ############### Lanczos
+                for i in range(iter):
+                    self.model.zero_grad()
+                    w_prime = [torch.zeros(p.size()).to(device) for p in self.params]
+                    if i == 0:
+                        if self.full_dataset:
+                            _, w_prime = self.dataloader_hv_product(v)
+                        else:
+                            w_prime = hessian_vector_product(
+                                self.gradsH, self.params, v)
+                        alpha = group_product(w_prime, v)
+                        if not torch.isfinite(alpha):
+                            skipped_runs+=1
+                            break
+                        alpha_list.append(alpha.cpu().item())
+                        w = group_add(w_prime, v, alpha=-alpha)
+                        w_list.append(w)
                     else:
-                        w_prime = hessian_vector_product(
-                            self.gradsH, self.params, v)
-                    alpha = group_product(w_prime, v)
-                    alpha_list.append(alpha.cpu().item())
-                    w = group_add(w_prime, v, alpha=-alpha)
-                    w_list.append(w)
+                        beta = torch.sqrt(group_product(w, w))
+                        if not torch.isfinite(beta):
+                            skipped_runs+=1
+                            break
+                        beta_list.append(beta.cpu().item())
+                        if beta_list[-1] != 0.:
+                            # We should re-orth it
+                            v = orthnormal(w, v_list)
+                            v_list.append(v)
+                        else:
+                            # generate a new vector
+                            w = [torch.randn(p.size()).to(device) for p in self.params]
+                            v = orthnormal(w, v_list)
+                            v_list.append(v)
+                        if self.full_dataset:
+                            _, w_prime = self.dataloader_hv_product(v)
+                        else:
+                            w_prime = hessian_vector_product(
+                                self.gradsH, self.params, v)
+                        alpha = group_product(w_prime, v)
+                        if not torch.isfinite(alpha):
+                            skipped_runs+=1
+                            beta_list.pop() # 不整合を防ぐため、先に追加したbetaを削除
+                            break
+                        alpha_list.append(alpha.cpu().item())
+                        w_tmp = group_add(w_prime, v, alpha=-alpha)
+                        w = group_add(w_tmp, v_list[-2], alpha=-beta)
                 else:
-                    beta = torch.sqrt(group_product(w, w))
-                    beta_list.append(beta.cpu().item())
-                    if beta_list[-1] != 0.:
-                        # We should re-orth it
-                        v = orthnormal(w, v_list)
-                        v_list.append(v)
-                    else:
-                        # generate a new vector
-                        w = [torch.randn(p.size()).to(device) for p in self.params]
-                        v = orthnormal(w, v_list)
-                        v_list.append(v)
-                    if self.full_dataset:
-                        _, w_prime = self.dataloader_hv_product(v)
-                    else:
-                        w_prime = hessian_vector_product(
-                            self.gradsH, self.params, v)
-                    alpha = group_product(w_prime, v)
-                    alpha_list.append(alpha.cpu().item())
-                    w_tmp = group_add(w_prime, v, alpha=-alpha)
-                    w = group_add(w_tmp, v_list[-2], alpha=-beta)
+                    break
 
             T = torch.zeros(iter, iter).to(device)
             for i in range(len(alpha_list)):
@@ -246,5 +266,6 @@ class hessian():
             
             eigen_list_full.append(list(eigen_list.cpu().numpy()))
             weight_list_full.append(list(weight_list.cpu().numpy()))
+        print(f"Skipped runs due to non-finite values: {skipped_runs}")
 
         return eigen_list_full, weight_list_full

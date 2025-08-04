@@ -9,7 +9,7 @@ setup(
     # Needed to actually package something
     packages=['pyhessian'],
     # Needed for dependencies
-    install_requires=['numpy', 'torch'],
+    install_requires=['numpy', 'torch', 'tqdm'],
     # Others
     version='0.0.1',
     license='MIT',
