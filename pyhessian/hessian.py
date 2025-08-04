@@ -4,7 +4,10 @@ import torch
 import math
 from torch.autograd import Variable
 import numpy as np
-import tqdm
+try:
+    import tqdm.notebook as tqdm
+except ImportError:
+    import tqdm
 
 from pyhessian.utils import group_product, group_add, normalization, get_params_grad, hessian_vector_product, orthnormal
 
@@ -180,17 +183,13 @@ class hessian():
         n_v: number of SLQ runs
         """
 
-        try:
-            progress_tqdm = tqdm.notebook.tqdm
-        except:
-            progress_tqdm = tqdm.tqdm
 
         device = self.device
         eigen_list_full = []
         weight_list_full = []
 
         skipped_runs = 0  # count the number of skipped runs due to non-finite values
-        for k in progress_tqdm(range(n_v)):
+        for k in tqdm.tqdm(range(n_v)):
             while True:
                 v = [
                     torch.randint_like(p, high=2, device=device)
